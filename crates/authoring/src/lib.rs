@@ -280,15 +280,28 @@ fn derive_anon_access(
         .iter()
         .map(|migration| migration.sql.as_str())
         .collect::<Vec<_>>()
-        .join("\n")
-        .split_whitespace()
+        .join("\n");
+    let uncommented = sql
+        .lines()
+        .map(|line| line.split_once("--").map(|(sql, _)| sql).unwrap_or(line))
         .collect::<Vec<_>>()
-        .join(" ")
-        .to_ascii_lowercase();
-    let usage = sql.contains(&format!("grant usage on schema {schema} to anon"));
-    let select = sql.contains(&format!(
-        "grant select on all tables in schema {schema} to anon"
-    ));
+        .join("\n");
+    let statements = uncommented
+        .split(';')
+        .map(|statement| {
+            statement
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_ascii_lowercase()
+        })
+        .collect::<Vec<_>>();
+    let usage = statements
+        .iter()
+        .any(|statement| statement == &format!("grant usage on schema {schema} to anon"));
+    let select = statements.iter().any(|statement| {
+        statement == &format!("grant select on all tables in schema {schema} to anon")
+    });
     match (usage, select) {
         (true, true) => Ok(AnonAccess::Read),
         (false, false) => Ok(AnonAccess::None),
@@ -423,5 +436,20 @@ enabled = true
             first.connector_context.migrations[0].checksum,
             second.connector_context.migrations[0].checksum
         );
+    }
+
+    #[test]
+    fn partial_or_commented_grants_cannot_claim_read_policy() {
+        let root = native_project();
+        fs::write(
+            root.path()
+                .join("supabase/migrations/202607130001_create_items.sql"),
+            "-- grant select on all tables in schema catalog to anon;\ngrant usage on schema \
+             catalog to anon;\n",
+        )
+        .unwrap();
+        let error = derive_component(root.path()).unwrap_err().to_string();
+        assert!(error.contains("native anon-read policy"));
+        assert!(error.contains("both"));
     }
 }
