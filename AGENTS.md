@@ -1,6 +1,6 @@
-# {{PROJECT}}
+# connector-supabase
 
-{{DESCRIPTION}}
+Supabase reconciler for Henosis graph slices
 
 ## Layout
 

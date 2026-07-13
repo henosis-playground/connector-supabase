@@ -1,4 +1,4 @@
-# Contributing to {{PROJECT}}
+# Contributing to connector-supabase
 
 ## Getting Started
 
@@ -92,6 +92,6 @@ Specifically, we would encourage:
 - File renames be isolated into their own commit
 - Add tests in a commit before their feature or fix, showing the current behavior
 
-[issues]: {{REPOSITORY}}/issues
-[new issue]: {{REPOSITORY}}/issues/new
-[all issues]: {{REPOSITORY}}/issues?utf8=%E2%9C%93&q=is%3Aissue
+[issues]: https://github.com/henosis-playground/connector-supabase/issues
+[new issue]: https://github.com/henosis-playground/connector-supabase/issues/new
+[all issues]: https://github.com/henosis-playground/connector-supabase/issues?utf8=%E2%9C%93&q=is%3Aissue
