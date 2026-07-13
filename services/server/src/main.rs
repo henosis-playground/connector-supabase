@@ -71,8 +71,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             runtime: RuntimeConfig::new(
                 path_env(
                     "HENOSIS_STATE_DIR",
-                    "/var/lib/henosis-connector-supabase/state-sdk-v1",
-                ),
+                    "/var/lib/henosis-connector-supabase/state",
+                )
+                .join("sdk-v1"),
                 plan_store,
             ),
             telemetry_filter: "henosis=info,connector_sdk=info".into(),

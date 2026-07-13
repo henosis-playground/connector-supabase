@@ -33,7 +33,7 @@ Docker secrets once with `bash infra/supabase/generate-dev-secrets.sh`, then sta
 | `HENOSIS_BIND` | `0.0.0.0:8082` | ConnectRPC listen address |
 | `HENOSIS_CORE_URL` | `http://core:8080` | Core callback/recovery origin |
 | `HENOSIS_CORE_TOKEN` | unset | Optional core bearer token |
-| `HENOSIS_STATE_DIR` | `/var/lib/henosis-connector-supabase/state-sdk-v1` | SDK checkpoints and recoverable plan cache |
+| `HENOSIS_STATE_DIR` | `/var/lib/henosis-connector-supabase/state` | State root; SDK checkpoints and recoverable plan cache live under `sdk-v1/` |
 | `S2_*` | required | Existing basin coordinates and token |
 | `HENOSIS_PLAN_STREAM_PREFIX` | `henosis-plans-v1` | Prefix for authoritative per-graph plan streams |
 | `HENOSIS_SUPABASE_JOURNAL_STREAM` | `connector-supabase-local-v1` | Distinct target-effect operation-journal stream |
