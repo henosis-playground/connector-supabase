@@ -1,9 +1,9 @@
 # Supabase derived component context v1
 
-Authors SHOULD NOT hand-write this JSON. The native-first contract in
-[native-authoring-v1.md](native-authoring-v1.md) deterministically derives it from
-`supabase/config.toml` and `supabase/migrations/*.sql`, with no marker or sidecar. This document
-remains the strict backend wire-format contract for collectors and other integrations.
+Authors SHOULD NOT hand-write this JSON. `@henosis/platform-supabase` and the platform inspector
+deterministically derive it from an executable `henosis.ts` definition plus the referenced native
+SQL migration directory. This document remains the strict backend wire-format contract for
+collectors and other integrations.
 
 `henosis.v1.ComponentSpec.connector_context` is opaque to core. For specs assigned to connector
 `supabase`, the bytes MUST be UTF-8 JSON matching this document. Unknown versions, unknown fields,
@@ -49,12 +49,12 @@ and missing fields fail closed.
   its checksum after a receipt exists is a plan failure.
 - `api.expose` selects whether the schema is included in PostgREST's exposed-schema configuration.
   `api.anonAccess` is `none` or `read`. `read` grants schema usage and SELECT on existing tables to
-  the `anon` role; future tables are reconciled on the next pass. Native derivation obtains these
-  values from `[api].schemas` and the matching migration `GRANT` statements.
-- each migration's `inputs` is derived from `-- henosis:input` comments. Every entry names the
-  transaction-local setting suffix, producer component-spec hash, top-level output property, and
-  optional JSON default. The private executable plan materializes values for the current generation;
-  connector context never contains the live upstream value.
+  the `anon` role; future tables are reconciled on the next pass. Both values come from the typed
+  database definition.
+- each migration's `inputs` comes from that migration ID's typed `migrationInputs` map. Every entry
+  names the transaction-local setting suffix, producer component-spec hash, and top-level output
+  property. The private executable plan materializes values for the current generation; connector
+  context never contains the live upstream value.
 
 Migration SQL is non-secret desired input. It MUST NOT contain passwords, tokens, keys, connection
 strings, or other secret material. V1 applies each migration transactionally with its schema first

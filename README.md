@@ -8,11 +8,11 @@ fresh PostgreSQL/PostgREST truth, rendered into machine and Markdown review proj
 reconciled one exact operation per pass. The connector reports one atomic complete slice level and
 publishes outputs only after re-observation proves convergence.
 
-The preferred authoring contract is the ordinary Supabase CLI project itself, with no Henosis marker
-or sidecar, as specified in [docs/native-authoring-v1.md](docs/native-authoring-v1.md). Its derivation
-library and `henosis-supabase-derive` tool produce the strict backend bytes documented in
-[docs/component-context-v1.md](docs/component-context-v1.md). Plan freshness and projection
-semantics are [docs/review-plan-v1.md](docs/review-plan-v1.md). Durable minimal state is
+Components author the platform layer with `@henosis/platform-supabase`: `henosis.ts` selects the
+owned schema, PostgREST exposure, anonymous policy, and a repository-relative native migration
+directory. The platform inspector reads and checksums those SQL files into the strict backend bytes
+documented in [docs/component-context-v1.md](docs/component-context-v1.md). Plan freshness and
+projection semantics are [docs/review-plan-v1.md](docs/review-plan-v1.md). Durable minimal state is
 [docs/operation-journal-v1.md](docs/operation-journal-v1.md).
 
 ## V1 scope
@@ -28,17 +28,13 @@ Supabase PostgreSQL, PostgREST, and Kong images plus this connector. Generate it
 Docker secrets once with `bash infra/supabase/generate-dev-secrets.sh`, then start it with
 `docker compose --profile phase-f up -d --wait supabase-db supabase-rest supabase-kong connector-supabase`.
 
-## Native authoring
+## TypeScript authoring with native migrations
 
-In a component repository initialized with `supabase init`, keep `supabase/config.toml`, native
-timestamped migrations, and optional seeds in their normal locations. The `supabase/` directory is
-the complete authoring contract: `project_id` supplies the component name and derives its owned
-schema, while migration input comments can declare upstream slots without SQL text substitution.
-Inspect the exact derived component material with:
-
-```console
-cargo run -p henosis-supabase-derive -- /path/to/repository
-```
+Use `defineDatabase` from `@henosis/platform-supabase` in the component repository's `henosis.ts`.
+Keep timestamped SQL files in the referenced migration directory, normally `supabase/migrations`.
+The platform inspector executes the definition separately, computes SHA-256 over each file's exact
+UTF-8 bytes, and emits this connector's fixed context. SQL remains native; platform configuration
+has one typed TypeScript authoring point.
 
 ## Service configuration
 
