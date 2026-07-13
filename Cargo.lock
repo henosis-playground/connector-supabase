@@ -972,7 +972,6 @@ dependencies = [
 name = "henosis-supabase-contract-harness"
 version = "0.0.0"
 dependencies = [
- "blake3",
  "buffa",
  "connectrpc",
  "henosis-proto",
@@ -983,7 +982,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "sha2 0.10.9",
  "tokio",
  "tokio-postgres",
  "uuid",
