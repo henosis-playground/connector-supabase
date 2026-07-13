@@ -6,15 +6,15 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use buffa::MessageField;
+use connector_sdk::henosis_proto::connect::henosis::v1::GraphServiceClient;
+use connector_sdk::henosis_proto::proto::henosis::v1::ComponentDispositionKind;
+use connector_sdk::henosis_proto::proto::henosis::v1::ComponentSpec;
+use connector_sdk::henosis_proto::proto::henosis::v1::CreateGraphRequest;
+use connector_sdk::henosis_proto::proto::henosis::v1::GetGraphRequest;
+use connector_sdk::henosis_proto::proto::henosis::v1::GraphState;
+use connector_sdk::henosis_proto::proto::henosis::v1::RegisterComponentSpecRequest;
 use connectrpc::client::ClientConfig;
 use connectrpc::client::HttpClient;
-use henosis_proto::connect::henosis::v1::GraphServiceClient;
-use henosis_proto::proto::henosis::v1::ComponentDispositionKind;
-use henosis_proto::proto::henosis::v1::ComponentSpec;
-use henosis_proto::proto::henosis::v1::CreateGraphRequest;
-use henosis_proto::proto::henosis::v1::GetGraphRequest;
-use henosis_proto::proto::henosis::v1::GraphState;
-use henosis_proto::proto::henosis::v1::RegisterComponentSpecRequest;
 use henosis_supabase_reconciler::CONNECTOR_NAME;
 use henosis_supabase_reconciler::context::API_VERSION;
 use henosis_supabase_reconciler::context::AnonAccess;
@@ -239,7 +239,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 fn assert_terminal(
     mode: Mode,
-    report: &henosis_proto::proto::henosis::v1::SliceReport,
+    report: &connector_sdk::henosis_proto::proto::henosis::v1::SliceReport,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match mode {
         Mode::Ready => {

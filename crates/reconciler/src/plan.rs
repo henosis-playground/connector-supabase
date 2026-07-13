@@ -3,7 +3,7 @@
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 
-use henosis_proto::proto::henosis::v1::ComponentOutputs;
+use connector_sdk::Output;
 use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest as _;
@@ -594,19 +594,16 @@ impl ExecutablePlan {
         self.plan_id = format!("sha256:{}", hex::encode(Sha256::digest(bytes)));
     }
 
-    /// Convert fully known planned outputs to shared-contract output values.
-    pub fn contract_outputs(&self) -> Vec<ComponentOutputs> {
+    /// Convert fully known planned outputs to SDK-owned output values.
+    pub fn outputs(&self) -> Vec<Output> {
         self.planned_outputs
             .iter()
-            .map(|output| {
-                ComponentOutputs::default()
-                    .with_component_spec_hash(
-                        hex::decode(&output.component_spec_hash)
-                            .expect("planned component hash is canonical"),
-                    )
-                    .with_values_json(
-                        serde_json::to_vec(&output.values).expect("planned output is JSON"),
-                    )
+            .map(|output| Output {
+                component_spec_hash: hex::decode(&output.component_spec_hash)
+                    .expect("planned component hash is canonical")
+                    .try_into()
+                    .expect("planned component hash has canonical width"),
+                values: output.values.clone(),
             })
             .collect()
     }

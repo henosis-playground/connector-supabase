@@ -2,11 +2,12 @@
 
 The Henosis reconciler for a local self-hosted Supabase project.
 
-It implements the generated `henosis.v1.ConnectorService` from core's
-`fix/verification-loop-1` branch. Each complete graph slice is strictly accepted, planned against
-fresh PostgreSQL/PostgREST truth, rendered into machine and Markdown review projections, and
-reconciled one exact operation per pass. The connector reports one atomic complete slice level and
-publishes outputs only after re-observation proves convergence.
+It implements only Supabase target lifecycle hooks on `connector-sdk`: strict target decoding,
+fresh PostgreSQL/PostgREST observation, immutable planning, one exact operation per apply pass, and
+conservative retirement. The SDK is the sole core-contract dependency and owns push serving,
+durable slice checkpoints, plan/review persistence, report construction and delivery, publication
+identity, keyed scheduling, retries, and common telemetry. Outputs are published only after fresh
+observation proves convergence.
 
 The authoring contract is [docs/component-context-v1.md](docs/component-context-v1.md). Plan
 freshness and projection semantics are [docs/review-plan-v1.md](docs/review-plan-v1.md). Durable
@@ -32,7 +33,7 @@ Docker secrets once with `bash infra/supabase/generate-dev-secrets.sh`, then sta
 | `HENOSIS_BIND` | `0.0.0.0:8082` | ConnectRPC listen address |
 | `HENOSIS_CORE_URL` | `http://core:8080` | Core callback/recovery origin |
 | `HENOSIS_CORE_TOKEN` | unset | Optional core bearer token |
-| `HENOSIS_STATE_DIR` | `/var/lib/henosis-connector-supabase/state` | Checkpoints, private plans, and review projections |
+| `HENOSIS_STATE_DIR` | `/var/lib/henosis-connector-supabase/state-sdk-v1` | SDK checkpoints, private plans, and review projections |
 | `S2_*` | required | Existing basin coordinates and token |
 | `HENOSIS_SUPABASE_JOURNAL_STREAM` | `connector-supabase-local-v1` | Target operation-journal stream |
 | `HENOSIS_SUPABASE_HOST` | `supabase-db` | Target PostgreSQL host |

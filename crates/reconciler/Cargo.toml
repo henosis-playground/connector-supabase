@@ -9,24 +9,20 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 blake3.workspace = true
-buffa.workspace = true
-connectrpc.workspace = true
+connector-sdk.workspace = true
 faultline.workspace = true
 futures.workspace = true
-henosis-proto.workspace = true
 hex.workspace = true
-http.workspace = true
 iddqd.workspace = true
 s2-sdk.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-postgres.workspace = true
-tracing.workspace = true
 uuid.workspace = true
 workspace-hack = { version = "0.0.0", path = "../workspace-hack" }
 

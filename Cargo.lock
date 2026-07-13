@@ -363,6 +363,32 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cc14f565cf027a105f7a44ccf9e5b424348421a1d8952a8fc9d499d313107789"
 
 [[package]]
+name = "connector-sdk"
+version = "0.1.0"
+source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=main#43a03a86231ba6c4920e110d67aea3005052e418"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "blake3",
+ "buffa",
+ "connectrpc",
+ "faultline",
+ "henosis-proto",
+ "hex",
+ "http",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+ "workspace-hack 0.0.0 (git+https://github.com/henosis-playground/connector-sdk.git?branch=main)",
+]
+
+[[package]]
 name = "connectrpc"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -927,13 +953,10 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "henosis-connector-supabase-server"
 version = "0.0.0"
 dependencies = [
- "axum",
- "connectrpc",
- "henosis-proto",
+ "connector-sdk",
  "henosis-supabase-reconciler",
  "http",
  "tokio",
- "tracing-subscriber",
  "workspace-hack 0.0.0",
 ]
 
@@ -960,8 +983,8 @@ version = "0.0.0"
 dependencies = [
  "blake3",
  "buffa",
+ "connector-sdk",
  "connectrpc",
- "henosis-proto",
  "henosis-supabase-reconciler",
  "hex",
  "http",
@@ -980,24 +1003,20 @@ name = "henosis-supabase-reconciler"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "blake3",
- "buffa",
- "connectrpc",
+ "connector-sdk",
  "faultline",
  "futures",
- "henosis-proto",
  "hex",
- "http",
  "iddqd",
  "s2-sdk",
  "serde",
  "serde_json",
  "sha2 0.10.9",
- "tempfile",
  "thiserror",
  "tokio",
  "tokio-postgres",
- "tracing",
  "uuid",
  "workspace-hack 0.0.0",
 ]
@@ -3005,12 +3024,11 @@ checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 name = "workspace-hack"
 version = "0.0.0"
 dependencies = [
- "axum",
- "axum-core",
  "bitflags",
  "bytes",
+ "form_urlencoded",
  "futures-channel",
- "futures-task",
+ "futures-core",
  "futures-util",
  "hyper-rustls",
  "hyper-util",
@@ -3021,7 +3039,6 @@ dependencies = [
  "rustls-webpki",
  "serde",
  "serde_core",
- "serde_json",
  "syn",
  "sync_wrapper",
  "tokio",
@@ -3061,6 +3078,14 @@ dependencies = [
  "tracing",
  "tracing-core",
  "uuid",
+]
+
+[[package]]
+name = "workspace-hack"
+version = "0.0.0"
+source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=main#43a03a86231ba6c4920e110d67aea3005052e418"
+dependencies = [
+ "serde_core",
 ]
 
 [[package]]
