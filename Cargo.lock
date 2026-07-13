@@ -365,7 +365,7 @@ checksum = "cc14f565cf027a105f7a44ccf9e5b424348421a1d8952a8fc9d499d313107789"
 [[package]]
 name = "connector-sdk"
 version = "0.1.0"
-source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=feat%2Fexplicit-plans#c14c71f2388ef63168700635b55e5bbb9719d55c"
+source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=feat%2Fexplicit-plans#2b0b0aae12ab8b7f0e7bef76871a81f2578aa61d"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -695,7 +695,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1735,7 +1735,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1893,7 +1893,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2390,7 +2390,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3054,7 +3054,7 @@ dependencies = [
 [[package]]
 name = "workspace-hack"
 version = "0.0.0"
-source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=feat%2Fexplicit-plans#c14c71f2388ef63168700635b55e5bbb9719d55c"
+source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=feat%2Fexplicit-plans#2b0b0aae12ab8b7f0e7bef76871a81f2578aa61d"
 dependencies = [
  "serde_core",
 ]
