@@ -190,6 +190,7 @@ impl Target {
         &self,
         desired: &DesiredSlice,
         plan: &ExecutablePlan,
+        authoritative_plan_id: &str,
         operation: &PlannedOperation,
     ) -> Result<ApplyResult, TargetError> {
         let mut client = self.connect().await?;
@@ -212,7 +213,7 @@ impl Target {
             });
         }
 
-        if let Err(error) = execute(&transaction, plan, operation).await {
+        if let Err(error) = execute(&transaction, authoritative_plan_id, operation).await {
             let _ = transaction.rollback().await;
             return Err(error);
         }
@@ -365,7 +366,7 @@ where
 
 async fn execute<C>(
     transaction: &C,
-    plan: &ExecutablePlan,
+    authoritative_plan_id: &str,
     planned: &PlannedOperation,
 ) -> Result<(), TargetError>
 where
@@ -417,7 +418,7 @@ where
                         &migration.id,
                         &migration.checksum,
                         schema,
-                        &plan.plan_id,
+                        &authoritative_plan_id,
                         &planned.id,
                     ],
                 )

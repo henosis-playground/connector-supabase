@@ -33,9 +33,10 @@ Docker secrets once with `bash infra/supabase/generate-dev-secrets.sh`, then sta
 | `HENOSIS_BIND` | `0.0.0.0:8082` | ConnectRPC listen address |
 | `HENOSIS_CORE_URL` | `http://core:8080` | Core callback/recovery origin |
 | `HENOSIS_CORE_TOKEN` | unset | Optional core bearer token |
-| `HENOSIS_STATE_DIR` | `/var/lib/henosis-connector-supabase/state-sdk-v1` | SDK checkpoints, private plans, and review projections |
+| `HENOSIS_STATE_DIR` | `/var/lib/henosis-connector-supabase/state-sdk-v1` | SDK checkpoints and recoverable plan cache |
 | `S2_*` | required | Existing basin coordinates and token |
-| `HENOSIS_SUPABASE_JOURNAL_STREAM` | `connector-supabase-local-v1` | Target operation-journal stream |
+| `HENOSIS_PLAN_STREAM_PREFIX` | `henosis-plans-v1` | Prefix for authoritative per-graph plan streams |
+| `HENOSIS_SUPABASE_JOURNAL_STREAM` | `connector-supabase-local-v1` | Distinct target-effect operation-journal stream |
 | `HENOSIS_SUPABASE_HOST` | `supabase-db` | Target PostgreSQL host |
 | `HENOSIS_SUPABASE_PORT` | `5432` | Target PostgreSQL port |
 | `HENOSIS_SUPABASE_PASSWORD_FILE` | `/run/secrets/supabase-postgres-password` | Trusted password secret |

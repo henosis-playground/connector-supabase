@@ -15,6 +15,7 @@ use connector_sdk::Publication;
 use connector_sdk::RetireContext;
 use connector_sdk::RetireOutcome;
 use connector_sdk::Retry;
+use connector_sdk::ReviewProjection;
 use connector_sdk::TargetSlice;
 use faultline::Error as Fault;
 
@@ -95,13 +96,20 @@ impl Connector for SupabaseConnector {
         let journal = load_for_plan(&self.journal).await?;
         let diagnostics = validate_desired(desired, &journal);
         if !diagnostics.is_empty() {
-            return Err(PlanOutcome::Failed(plan_diagnostics(diagnostics)));
+            return Err(PlanOutcome::Failed {
+                proposal: declarative_plan("failed", "Desired Supabase state is invalid."),
+                diagnostics: plan_diagnostics(diagnostics),
+            });
         }
         let target = self
             .target
             .observe(desired)
             .await
             .map_err(|error| PlanOutcome::Waiting {
+                proposal: declarative_plan(
+                    "blocked",
+                    "Target observation is unavailable; no mutation can be planned.",
+                ),
                 diagnostics: vec![
                     Diagnostic::warning("supabase.target.observe", error.to_string())
                         .help("The connector will retry observation without applying anything."),
@@ -122,7 +130,7 @@ impl Connector for SupabaseConnector {
             &observed.journal,
             &observed.target,
             PlanContext {
-                journal_tail_after_plan: observed.journal.tail.saturating_add(1),
+                journal_tail: observed.journal.tail,
                 connector_build: &self.config.connector_build,
                 api_url: self.target.api_url(),
                 database_url_ref: self.target.database_url_ref(),
@@ -130,10 +138,20 @@ impl Connector for SupabaseConnector {
             },
         ) {
             Ok(plan) => plan,
-            Err(diagnostics) => return PlanOutcome::Failed(plan_diagnostics(diagnostics)),
+            Err(diagnostics) => {
+                return PlanOutcome::Failed {
+                    proposal: declarative_plan(
+                        "failed",
+                        "Supabase planning rejected desired state.",
+                    ),
+                    diagnostics: plan_diagnostics(diagnostics),
+                };
+            }
         };
+        let projection = review::project(&plan);
         if plan.operations.is_empty() {
             return PlanOutcome::Ready {
+                proposal: PlanProposal::executable(plan.clone(), projection),
                 outputs: plan.outputs(),
                 diagnostics: Vec::new(),
                 publication: Some(Publication {
@@ -142,42 +160,7 @@ impl Connector for SupabaseConnector {
                 }),
             };
         }
-        let event = JournalEvent::PlanCreated {
-            plan_id: plan.plan_id.clone(),
-            graph_id: plan.graph_id.clone(),
-            generation: plan.generation.clone(),
-            slice_sequence: plan.slice_sequence.clone(),
-            desired_digest: plan.desired_digest.clone(),
-            observed_digest: plan.observed_digest.clone(),
-        };
-        match self.journal.append(observed.journal.tail, event).await {
-            Ok(tail) if tail.to_string() == plan.journal_tail => PlanOutcome::Apply(PlanProposal {
-                review: review::project(&plan),
-                plan,
-            }),
-            Ok(_) => PlanOutcome::Failed(vec![Diagnostic::error(
-                "supabase.journal.plan-fence",
-                "PlanCreated tail differs from the executable freshness fence",
-            )]),
-            Err(Fault::Domain(JournalError::CasConflict { .. })) => PlanOutcome::Waiting {
-                diagnostics: vec![Diagnostic::info(
-                    "supabase.plan.stale",
-                    "operation journal advanced while the plan was being persisted",
-                )],
-                retry: Retry::immediate(),
-            },
-            Err(Fault::Transient(error)) => PlanOutcome::Waiting {
-                diagnostics: vec![Diagnostic::warning(
-                    "supabase.journal.unavailable",
-                    error.to_string(),
-                )],
-                retry: Retry::after(Duration::from_secs(2)),
-            },
-            Err(Fault::Invariant(error)) => PlanOutcome::Failed(vec![Diagnostic::error(
-                "supabase.journal.invariant",
-                error.to_string(),
-            )]),
-        }
+        PlanOutcome::Apply(PlanProposal::executable(plan, projection))
     }
 
     async fn apply(
@@ -187,6 +170,7 @@ impl Connector for SupabaseConnector {
         approved: &Approved<Self::Plan>,
     ) -> ApplyOutcome {
         let plan = approved.plan();
+        let authoritative_plan_id = approved.digest();
         if !plan.verify_digest() || !plan_matches(plan, desired) {
             return ApplyOutcome::Failed(vec![Diagnostic::error(
                 "supabase.plan.identity",
@@ -221,21 +205,9 @@ impl Connector for SupabaseConnector {
         }
         let interrupted = matches!(
             operation_state,
-            Some(OperationState::Started { ref plan_id }) if plan_id == &plan.plan_id
+            Some(OperationState::Started { ref plan_id }) if plan_id == authoritative_plan_id
         );
         if journal.tail != expected_tail && !interrupted {
-            if let Err(outcome) = append_for_apply(
-                &self.journal,
-                journal.tail,
-                JournalEvent::PlanStale {
-                    plan_id: plan.plan_id.clone(),
-                    reason: "journal-fence-changed".into(),
-                },
-            )
-            .await
-            {
-                return outcome;
-            }
             return ApplyOutcome::Stale(vec![Diagnostic::info(
                 "supabase.plan.stale",
                 "operation journal advanced after this plan was reviewed; no target mutation was \
@@ -246,7 +218,9 @@ impl Connector for SupabaseConnector {
         if let Operation::EstablishBinding { binding } = &operation.operation {
             let mut tail = journal.tail;
             if !interrupted {
-                tail = match append_started(&self.journal, tail, plan, operation).await {
+                tail = match append_started(&self.journal, tail, authoritative_plan_id, operation)
+                    .await
+                {
                     Ok(tail) => tail,
                     Err(outcome) => return outcome,
                 };
@@ -266,7 +240,7 @@ impl Connector for SupabaseConnector {
             if let Err(outcome) = append_succeeded(
                 &self.journal,
                 tail,
-                plan,
+                authoritative_plan_id,
                 operation,
                 &plan.observed_digest,
                 interrupted,
@@ -288,8 +262,15 @@ impl Connector for SupabaseConnector {
                 .operation_satisfied(&operation.operation, &current)
         {
             let digest = format!("blake3:{}", hex::encode(current.digest()));
-            if let Err(outcome) =
-                append_succeeded(&self.journal, journal.tail, plan, operation, &digest, true).await
+            if let Err(outcome) = append_succeeded(
+                &self.journal,
+                journal.tail,
+                authoritative_plan_id,
+                operation,
+                &digest,
+                true,
+            )
+            .await
             {
                 return outcome;
             }
@@ -298,17 +279,22 @@ impl Connector for SupabaseConnector {
 
         let mut tail = journal.tail;
         if !interrupted {
-            tail = match append_started(&self.journal, tail, plan, operation).await {
+            tail = match append_started(&self.journal, tail, authoritative_plan_id, operation).await
+            {
                 Ok(tail) => tail,
                 Err(outcome) => return outcome,
             };
         }
-        match self.target.apply(desired, plan, operation).await {
+        match self
+            .target
+            .apply(desired, plan, authoritative_plan_id, operation)
+            .await
+        {
             Ok(ApplyResult::Applied { observed_digest }) => {
                 if let Err(outcome) = append_succeeded(
                     &self.journal,
                     tail,
-                    plan,
+                    authoritative_plan_id,
                     operation,
                     &observed_digest,
                     interrupted,
@@ -319,32 +305,13 @@ impl Connector for SupabaseConnector {
                 }
                 ApplyOutcome::Progress(vec![operation_complete(operation, plan, interrupted)])
             }
-            Ok(ApplyResult::Stale { observed_digest }) => {
-                let snapshot = match load_for_apply(&self.journal).await {
-                    Ok(snapshot) => snapshot,
-                    Err(outcome) => return outcome,
-                };
-                if let Err(outcome) = append_for_apply(
-                    &self.journal,
-                    snapshot.tail,
-                    JournalEvent::PlanStale {
-                        plan_id: plan.plan_id.clone(),
-                        reason: format!("target-changed:{observed_digest}"),
-                    },
+            Ok(ApplyResult::Stale { observed_digest: _ }) => ApplyOutcome::Stale(vec![
+                Diagnostic::info(
+                    "supabase.plan.stale",
+                    "target observation changed before apply; the exact reviewed plan was rejected",
                 )
-                .await
-                {
-                    return outcome;
-                }
-                ApplyOutcome::Stale(vec![
-                    Diagnostic::info(
-                        "supabase.plan.stale",
-                        "target observation changed before apply; the exact reviewed plan was \
-                         rejected",
-                    )
-                    .help("A new plan will be derived from current target truth."),
-                ])
-            }
+                .help("A new plan will be derived from current target truth."),
+            ]),
             Err(TargetError::Provider(provider)) => {
                 let snapshot = match load_for_apply(&self.journal).await {
                     Ok(snapshot) => snapshot,
@@ -354,7 +321,7 @@ impl Connector for SupabaseConnector {
                     &self.journal,
                     snapshot.tail,
                     JournalEvent::OperationFailed {
-                        plan_id: plan.plan_id.clone(),
+                        plan_id: authoritative_plan_id.into(),
                         operation_id: operation.id.clone(),
                         code: provider.code.clone(),
                         detail: provider.detail.clone(),
@@ -438,16 +405,26 @@ async fn load_for_plan(
     match journal.load().await {
         Ok(snapshot) => Ok(snapshot),
         Err(Fault::Transient(error)) => Err(PlanOutcome::Waiting {
+            proposal: declarative_plan(
+                "blocked",
+                "Target-effect journal is unavailable; planning cannot establish freshness.",
+            ),
             diagnostics: vec![Diagnostic::warning(
                 "supabase.journal.unavailable",
                 error.to_string(),
             )],
             retry: Retry::after(Duration::from_secs(2)),
         }),
-        Err(Fault::Invariant(error)) => Err(PlanOutcome::Failed(vec![Diagnostic::error(
-            "supabase.journal.invariant",
-            error.to_string(),
-        )])),
+        Err(Fault::Invariant(error)) => Err(PlanOutcome::Failed {
+            proposal: declarative_plan(
+                "failed",
+                "Target-effect journal contains invalid durable evidence.",
+            ),
+            diagnostics: vec![Diagnostic::error(
+                "supabase.journal.invariant",
+                error.to_string(),
+            )],
+        }),
     }
 }
 
@@ -498,14 +475,14 @@ async fn append_for_apply(
 async fn append_started(
     journal: &OperationJournal,
     tail: u64,
-    plan: &ExecutablePlan,
+    plan_id: &str,
     operation: &PlannedOperation,
 ) -> Result<u64, ApplyOutcome> {
     append_for_apply(
         journal,
         tail,
         JournalEvent::OperationStarted {
-            plan_id: plan.plan_id.clone(),
+            plan_id: plan_id.into(),
             operation_id: operation.id.clone(),
             idempotency_key: operation.id.clone(),
         },
@@ -516,7 +493,7 @@ async fn append_started(
 async fn append_succeeded(
     journal: &OperationJournal,
     tail: u64,
-    plan: &ExecutablePlan,
+    plan_id: &str,
     operation: &PlannedOperation,
     observed_digest: &str,
     recovered: bool,
@@ -525,7 +502,7 @@ async fn append_succeeded(
         journal,
         tail,
         JournalEvent::OperationSucceeded {
-            plan_id: plan.plan_id.clone(),
+            plan_id: plan_id.into(),
             operation_id: operation.id.clone(),
             observed_digest: observed_digest.into(),
             recovered,
@@ -551,6 +528,13 @@ fn plan_diagnostics(diagnostics: Vec<PlanDiagnostic>) -> Vec<Diagnostic> {
                 .help(item.help)
         })
         .collect()
+}
+
+fn declarative_plan(status: &str, detail: &str) -> PlanProposal<ExecutablePlan> {
+    PlanProposal::declarative(ReviewProjection {
+        json: serde_json::json!({"status": status, "detail": detail}),
+        markdown: format!("# Supabase plan\n\n**Status:** {status}\n\n{detail}"),
+    })
 }
 
 fn target_waiting(error: TargetError) -> ApplyOutcome {

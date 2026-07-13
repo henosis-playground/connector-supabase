@@ -47,7 +47,7 @@ pub struct ExecutablePlan {
     pub desired_digest: String,
     /// Exact observed-target BLAKE3 digest.
     pub observed_digest: String,
-    /// Required journal tail after `PlanCreated`.
+    /// Exact target-effect journal tail observed during planning.
     pub journal_tail: String,
     /// Complete ordered native operation proposal.
     pub operations: Vec<PlannedOperation>,
@@ -209,8 +209,8 @@ pub struct PlanDiagnostic {
 /// Connector/runtime facts bound into a plan but not desired by authoring.
 #[derive(Clone, Copy, Debug)]
 pub struct PlanContext<'a> {
-    /// Tail required immediately after appending `PlanCreated`.
-    pub journal_tail_after_plan: u64,
+    /// Exact target-effect journal tail observed during planning.
+    pub journal_tail: u64,
     /// Connector build identity.
     pub connector_build: &'a str,
     /// Credential-free public API origin.
@@ -556,7 +556,7 @@ pub fn build_plan(
         target: "local/henosis-local/postgres".into(),
         desired_digest,
         observed_digest,
-        journal_tail: context.journal_tail_after_plan.to_string(),
+        journal_tail: context.journal_tail.to_string(),
         operations,
         planned_outputs,
     };
@@ -691,7 +691,7 @@ mod tests {
             &JournalSnapshot::default(),
             &observed(),
             PlanContext {
-                journal_tail_after_plan: 1,
+                journal_tail: 1,
                 connector_build: "test-build",
                 api_url: "http://localhost:4484",
                 database_url_ref: "docker-secret://db",
@@ -723,7 +723,7 @@ mod tests {
             &JournalSnapshot::default(),
             &observed(),
             PlanContext {
-                journal_tail_after_plan: 1,
+                journal_tail: 1,
                 connector_build: "test-build",
                 api_url: "http://localhost:4484",
                 database_url_ref: "docker-secret://db",

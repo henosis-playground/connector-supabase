@@ -7,12 +7,13 @@ CAS-protected by S2 sequence number.
 The journal retains only operational facts that cannot safely be reconstructed:
 
 - stable `resourceId` to `{project, database, schema}` identity bindings and graph ownership;
-- plan identity, input/freshness fences, and operation IDs;
-- operation started/succeeded/failed/stale receipts and uncertainty;
+- the authoritative S2 plan digest on each target-effect operation and its operation ID;
+- operation started/succeeded/failed receipts and uncertainty;
 - retirement/release facts.
 
-It does not mirror tables, columns, grants, PostgREST settings, migration SQL, outputs, passwords,
-keys, or a full desired slice. Those facts are re-observed or recovered from core. PostgreSQL's
+It is not the plan store: explicit plans and review projections live in the SDK's per-graph S2 plan
+stream. It does not mirror tables, columns, grants, PostgREST settings, migration SQL, outputs,
+passwords, keys, or a full desired slice. Those facts are re-observed or recovered from core. PostgreSQL's
 `henosis_connector.migration_receipts` table is the authoritative target-side ledger for ordered
 migrations; the S2 receipt explains which reviewed Henosis operation caused each transition.
 

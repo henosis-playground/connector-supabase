@@ -365,7 +365,7 @@ checksum = "cc14f565cf027a105f7a44ccf9e5b424348421a1d8952a8fc9d499d313107789"
 [[package]]
 name = "connector-sdk"
 version = "0.1.0"
-source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=feat%2Faudit-consumption#44592c3c287367623e35f1d28803a5c6201d7637"
+source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=feat%2Fexplicit-plans#c14c71f2388ef63168700635b55e5bbb9719d55c"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -377,6 +377,7 @@ dependencies = [
  "henosis-proto",
  "hex",
  "http",
+ "s2-sdk",
  "serde",
  "serde_json",
  "tempfile",
@@ -385,7 +386,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "workspace-hack 0.0.0 (git+https://github.com/henosis-playground/connector-sdk.git?branch=feat%2Faudit-consumption)",
+ "workspace-hack 0.0.0 (git+https://github.com/henosis-playground/connector-sdk.git?branch=feat%2Fexplicit-plans)",
 ]
 
 [[package]]
@@ -963,7 +964,7 @@ dependencies = [
 [[package]]
 name = "henosis-proto"
 version = "0.0.0"
-source = "git+https://github.com/henosis-playground/core.git?branch=fix%2Fverification-loop-1#d3d9b98cc185fbc2b8e46e2ccdc38306e0665076"
+source = "git+https://github.com/henosis-playground/core.git?rev=d3d9b98cc185fbc2b8e46e2ccdc38306e0665076#d3d9b98cc185fbc2b8e46e2ccdc38306e0665076"
 dependencies = [
  "blake3",
  "buffa",
@@ -974,7 +975,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror",
- "workspace-hack 0.0.0 (git+https://github.com/henosis-playground/core.git?branch=fix%2Fverification-loop-1)",
+ "workspace-hack 0.0.0 (git+https://github.com/henosis-playground/core.git?rev=d3d9b98cc185fbc2b8e46e2ccdc38306e0665076)",
 ]
 
 [[package]]
@@ -1024,14 +1025,14 @@ dependencies = [
 [[package]]
 name = "henosis-types"
 version = "0.0.0"
-source = "git+https://github.com/henosis-playground/core.git?branch=fix%2Fverification-loop-1#d3d9b98cc185fbc2b8e46e2ccdc38306e0665076"
+source = "git+https://github.com/henosis-playground/core.git?rev=d3d9b98cc185fbc2b8e46e2ccdc38306e0665076#d3d9b98cc185fbc2b8e46e2ccdc38306e0665076"
 dependencies = [
  "iddqd",
  "newtype-uuid",
  "serde",
  "thiserror",
  "uuid",
- "workspace-hack 0.0.0 (git+https://github.com/henosis-playground/core.git?branch=fix%2Fverification-loop-1)",
+ "workspace-hack 0.0.0 (git+https://github.com/henosis-playground/core.git?rev=d3d9b98cc185fbc2b8e46e2ccdc38306e0665076)",
 ]
 
 [[package]]
@@ -3053,7 +3054,7 @@ dependencies = [
 [[package]]
 name = "workspace-hack"
 version = "0.0.0"
-source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=feat%2Faudit-consumption#44592c3c287367623e35f1d28803a5c6201d7637"
+source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=feat%2Fexplicit-plans#c14c71f2388ef63168700635b55e5bbb9719d55c"
 dependencies = [
  "serde_core",
 ]
@@ -3061,7 +3062,7 @@ dependencies = [
 [[package]]
 name = "workspace-hack"
 version = "0.0.0"
-source = "git+https://github.com/henosis-playground/core.git?branch=fix%2Fverification-loop-1#d3d9b98cc185fbc2b8e46e2ccdc38306e0665076"
+source = "git+https://github.com/henosis-playground/core.git?rev=d3d9b98cc185fbc2b8e46e2ccdc38306e0665076#d3d9b98cc185fbc2b8e46e2ccdc38306e0665076"
 dependencies = [
  "bitflags",
  "bytes",

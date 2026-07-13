@@ -4,6 +4,8 @@ use std::env;
 use std::path::PathBuf;
 
 use connector_sdk::RuntimeConfig;
+use connector_sdk::S2PlanStore;
+use connector_sdk::S2PlanStoreConfig;
 use connector_sdk::ServeConfig;
 use henosis_supabase_reconciler::ConnectorConfig;
 use henosis_supabase_reconciler::SupabaseConnector;
@@ -44,6 +46,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             "connector-supabase-local-v1",
         ),
     })?;
+    let plan_store = S2PlanStore::connect(&S2PlanStoreConfig {
+        access_token: required("S2_ACCESS_TOKEN")?,
+        account_endpoint: required("S2_ACCOUNT_ENDPOINT")?,
+        basin_endpoint: required("S2_BASIN_ENDPOINT")?,
+        basin: required("S2_BASIN")?,
+        stream_prefix: string_env("HENOSIS_PLAN_STREAM_PREFIX", "henosis-plans-v1"),
+    })?;
     let connector = SupabaseConnector::new(
         ConnectorConfig {
             connector_build: env!("CARGO_PKG_VERSION").into(),
@@ -59,10 +68,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             bind: string_env("HENOSIS_BIND", "0.0.0.0:8082"),
             core_uri: string_env("HENOSIS_CORE_URL", "http://core:8080").parse::<Uri>()?,
             core_token,
-            runtime: RuntimeConfig::new(path_env(
-                "HENOSIS_STATE_DIR",
-                "/var/lib/henosis-connector-supabase/state-sdk-v1",
-            )),
+            runtime: RuntimeConfig::new(
+                path_env(
+                    "HENOSIS_STATE_DIR",
+                    "/var/lib/henosis-connector-supabase/state-sdk-v1",
+                ),
+                plan_store,
+            ),
             telemetry_filter: "henosis=info,connector_sdk=info".into(),
         },
         connector,

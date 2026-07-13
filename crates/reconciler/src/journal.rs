@@ -122,28 +122,19 @@ pub struct JournalEnvelope {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum JournalEvent {
-    /// A reviewable plan was durably proposed.
+    /// Legacy pre-SDK plan marker retained only so existing streams remain
+    /// readable.
     PlanCreated {
-        /// Immutable plan digest.
         plan_id: String,
-        /// Owning graph.
         graph_id: String,
-        /// Desired generation.
         generation: String,
-        /// Exact slice level.
         slice_sequence: String,
-        /// Complete desired digest.
         desired_digest: String,
-        /// Target digest used by the plan.
         observed_digest: String,
     },
-    /// A plan freshness precondition no longer held.
-    PlanStale {
-        /// Rejected plan.
-        plan_id: String,
-        /// Stable cause classification.
-        reason: String,
-    },
+    /// Legacy pre-SDK stale marker retained only so existing streams remain
+    /// readable.
+    PlanStale { plan_id: String, reason: String },
     /// A stable remote identity was claimed.
     BindingEstablished {
         /// Complete binding.
@@ -333,6 +324,7 @@ fn journal_invariant(
 impl JournalSnapshot {
     fn apply(&mut self, event: JournalEvent) {
         match event {
+            JournalEvent::PlanCreated { .. } | JournalEvent::PlanStale { .. } => {}
             JournalEvent::BindingEstablished { binding } => {
                 self.bindings.insert(binding.resource_id.clone(), binding);
             }
@@ -377,7 +369,6 @@ impl JournalSnapshot {
                 self.bindings
                     .retain(|_, binding| binding.graph_id != graph_id);
             }
-            JournalEvent::PlanCreated { .. } | JournalEvent::PlanStale { .. } => {}
         }
     }
 }
