@@ -1,0 +1,21 @@
+[package]
+name = "henosis-connector-supabase-server"
+version = "0.0.0"
+description = "Service process for the Henosis Supabase reconciler"
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+axum.workspace = true
+connectrpc.workspace = true
+henosis-proto.workspace = true
+henosis-supabase-reconciler.workspace = true
+http.workspace = true
+tokio.workspace = true
+tracing-subscriber.workspace = true
+workspace-hack = { version = "0.0.0", path = "../../crates/workspace-hack" }
+
+[lints]
+workspace = true

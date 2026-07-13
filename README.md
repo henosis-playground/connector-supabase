@@ -1,6 +1,44 @@
 # connector-supabase
 
-Supabase reconciler for Henosis graph slices
+The Henosis reconciler for a local self-hosted Supabase project.
+
+It implements the generated `henosis.v1.ConnectorService` from core's
+`fix/verification-loop-1` branch. Each complete graph slice is strictly accepted, planned against
+fresh PostgreSQL/PostgREST truth, rendered into machine and Markdown review projections, and
+reconciled one exact operation per pass. The connector reports one atomic complete slice level and
+publishes outputs only after re-observation proves convergence.
+
+The authoring contract is [docs/component-context-v1.md](docs/component-context-v1.md). Plan
+freshness and projection semantics are [docs/review-plan-v1.md](docs/review-plan-v1.md). Durable
+minimal state is [docs/operation-journal-v1.md](docs/operation-journal-v1.md).
+
+## V1 scope
+
+Self-hosted Supabase is one project and does not expose the hosted platform's project-management
+API. V1 therefore reconciles owned PostgreSQL schemas, additive ordered migrations, anonymous read
+grants, and PostgREST exposed-schema configuration inside the pre-provisioned `henosis-local`
+project. It deliberately does not fake project/database creation, mirror PostgreSQL into connector
+state, auto-apply destructive SQL, or place credentials in world outputs.
+
+The additive `phase-f` Compose profile under `/home/null/Work/henosis/infra` runs pinned official
+Supabase PostgreSQL, PostgREST, and Kong images plus this connector. Generate its ignored local
+Docker secrets once with `bash infra/supabase/generate-dev-secrets.sh`, then start it with
+`docker compose --profile phase-f up -d --wait supabase-db supabase-rest supabase-kong connector-supabase`.
+
+## Service configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `HENOSIS_BIND` | `0.0.0.0:8082` | ConnectRPC listen address |
+| `HENOSIS_CORE_URL` | `http://core:8080` | Core callback/recovery origin |
+| `HENOSIS_CORE_TOKEN` | unset | Optional core bearer token |
+| `HENOSIS_STATE_DIR` | `/var/lib/henosis-connector-supabase/state` | Checkpoints, private plans, and review projections |
+| `S2_*` | required | Existing basin coordinates and token |
+| `HENOSIS_SUPABASE_JOURNAL_STREAM` | `connector-supabase-local-v1` | Target operation-journal stream |
+| `HENOSIS_SUPABASE_HOST` | `supabase-db` | Target PostgreSQL host |
+| `HENOSIS_SUPABASE_PORT` | `5432` | Target PostgreSQL port |
+| `HENOSIS_SUPABASE_PASSWORD_FILE` | `/run/secrets/supabase-postgres-password` | Trusted password secret |
+| `HENOSIS_SUPABASE_API_URL` | `http://127.0.0.1:4484` | Credential-free public output origin |
 
 ## Layout
 
