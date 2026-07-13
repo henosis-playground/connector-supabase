@@ -1,4 +1,9 @@
-# Supabase component context v1
+# Supabase derived component context v1
+
+Authors SHOULD NOT hand-write this JSON. The native-first contract in
+[native-authoring-v1.md](native-authoring-v1.md) deterministically derives it from
+`supabase/config.toml`, `supabase/migrations/*.sql`, and the minimal `henosis.toml` marker. This
+document remains the strict backend wire-format contract for collectors and other integrations.
 
 `henosis.v1.ComponentSpec.connector_context` is opaque to core. For specs assigned to connector
 `supabase`, the bytes MUST be UTF-8 JSON matching this document. Unknown versions, unknown fields,
@@ -28,7 +33,7 @@ and missing fields fail closed.
 }
 ```
 
-## Required authoring input
+## Required derived input
 
 - `apiVersion` is exactly `henosis.dev/supabase-component-context/v1`.
 - `resourceId` is a stable logical identity matching `[a-z][a-z0-9_-]{0,62}`. It survives spec
@@ -43,7 +48,9 @@ and missing fields fail closed.
   its checksum after a receipt exists is a plan failure.
 - `api.expose` selects whether the schema is included in PostgREST's exposed-schema configuration.
   `api.anonAccess` is `none` or `read`. `read` grants schema usage and SELECT on existing tables to
-  the `anon` role; future tables are reconciled on the next pass.
+  the `anon` role; future tables are reconciled on the next pass. Native derivation obtains these
+  values from `[api].schemas` and the matching migration `GRANT` statements; they are not duplicated
+  in `henosis.toml`.
 
 Migration SQL is non-secret desired input. It MUST NOT contain passwords, tokens, keys, connection
 strings, or other secret material. V1 applies each migration transactionally with its schema first

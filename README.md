@@ -8,9 +8,12 @@ fresh PostgreSQL/PostgREST truth, rendered into machine and Markdown review proj
 reconciled one exact operation per pass. The connector reports one atomic complete slice level and
 publishes outputs only after re-observation proves convergence.
 
-The authoring contract is [docs/component-context-v1.md](docs/component-context-v1.md). Plan
-freshness and projection semantics are [docs/review-plan-v1.md](docs/review-plan-v1.md). Durable
-minimal state is [docs/operation-journal-v1.md](docs/operation-journal-v1.md).
+The preferred authoring contract is an ordinary Supabase CLI project plus a three-field marker,
+specified in [docs/native-authoring-v1.md](docs/native-authoring-v1.md). Its derivation library and
+`henosis-supabase-derive` tool produce the strict backend bytes documented in
+[docs/component-context-v1.md](docs/component-context-v1.md). Plan freshness and projection
+semantics are [docs/review-plan-v1.md](docs/review-plan-v1.md). Durable minimal state is
+[docs/operation-journal-v1.md](docs/operation-journal-v1.md).
 
 ## V1 scope
 
@@ -24,6 +27,23 @@ The additive `phase-f` Compose profile under `/home/null/Work/henosis/infra` run
 Supabase PostgreSQL, PostgREST, and Kong images plus this connector. Generate its ignored local
 Docker secrets once with `bash infra/supabase/generate-dev-secrets.sh`, then start it with
 `docker compose --profile phase-f up -d --wait supabase-db supabase-rest supabase-kong connector-supabase`.
+
+## Native authoring
+
+In a component repository initialized with `supabase init`, keep `supabase/config.toml`, native
+timestamped migrations, and optional seeds in their normal locations. Add only:
+
+```toml
+api_version = "henosis.dev/supabase-component/v1"
+schema = "catalog"
+depends_on = []
+```
+
+Then inspect the exact derived component material with:
+
+```console
+cargo run -p henosis-supabase-derive -- /path/to/repository
+```
 
 ## Service configuration
 

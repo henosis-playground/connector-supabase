@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "services/*", "tests/*"]
+members = ["crates/*", "services/*", "tests/*", "tools/*"]
 
 [workspace.package]
 repository = "https://github.com/henosis-playground/connector-supabase"
@@ -36,6 +36,7 @@ serde_json = "1.0.140"
 sha2 = "0.10.9"
 tempfile = "3.20.0"
 thiserror = "2.0.12"
+toml = "0.9.5"
 tokio = { version = "1.45.1", features = [
   "fs",
   "macros",
@@ -53,6 +54,7 @@ uuid = { version = "1.17.0", features = ["v5", "v7"] }
 henosis-proto = { git = "https://github.com/henosis-playground/core.git", branch = "fix/verification-loop-1" }
 
 henosis-supabase-reconciler = { path = "crates/reconciler" }
+henosis-supabase-authoring = { path = "crates/authoring" }
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "warn", priority = -1 }

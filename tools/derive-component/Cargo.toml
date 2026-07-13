@@ -1,0 +1,14 @@
+[package]
+name = "henosis-supabase-derive"
+version = "0.1.0"
+repository.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+henosis-supabase-authoring.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
