@@ -9,6 +9,7 @@ use henosis_supabase_reconciler::context::API_VERSION as CONTEXT_API_VERSION;
 use henosis_supabase_reconciler::context::AnonAccess;
 use henosis_supabase_reconciler::context::ApiContext;
 use henosis_supabase_reconciler::context::ComponentContext;
+use henosis_supabase_reconciler::context::InputSlot;
 use henosis_supabase_reconciler::context::Migration;
 use henosis_supabase_reconciler::context::TargetContext;
 use serde::Deserialize;
@@ -17,16 +18,13 @@ use sha2::Digest as _;
 use sha2::Sha256;
 use thiserror::Error;
 
-/// Minimal marker format understood by this authoring integration.
-pub const MARKER_API_VERSION: &str = "henosis.dev/supabase-component/v1";
-
 /// Fully derived material needed to construct a core `ComponentSpec`.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DerivedComponent {
     /// Component name derived from native `project_id`.
     pub name: String,
-    /// Connector assignment implied by the marker version.
+    /// Connector assignment implied by the native `supabase/` project.
     pub connector: String,
     /// Connector-defined, fixed output contract.
     pub outputs_schema: serde_json::Value,
@@ -49,7 +47,7 @@ impl DerivedComponent {
     }
 }
 
-/// Native project or marker error discovered before component registration.
+/// Native project error discovered before component registration.
 #[derive(Debug, Error)]
 pub enum DeriveError {
     /// A required file or directory cannot be read.
@@ -85,16 +83,8 @@ pub enum DeriveError {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Marker {
-    api_version: String,
-    schema: String,
-    #[serde(default)]
-    depends_on: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct SupabaseConfig {
+    #[serde(default)]
     project_id: String,
     api: SupabaseApi,
     #[serde(default)]
@@ -134,23 +124,22 @@ const fn enabled() -> bool {
 /// Derive a complete component authoring result from a repository root.
 pub fn derive_component(repository: impl AsRef<Path>) -> Result<DerivedComponent, DeriveError> {
     let root = repository.as_ref();
-    let marker_path = root.join("henosis.toml");
     let config_path = root.join("supabase/config.toml");
-    let marker = parse_toml::<Marker>(&marker_path)?;
     let config = parse_toml::<SupabaseConfig>(&config_path)?;
-
-    if marker.api_version != MARKER_API_VERSION {
-        return invalid(
-            marker_path,
-            format!(
-                "api_version must be {MARKER_API_VERSION:?}, got {:?}",
-                marker.api_version
-            ),
-        );
-    }
-    if config.project_id.is_empty() {
-        return invalid(config_path, "project_id must not be empty");
-    }
+    let name = if config.project_id.trim().is_empty() {
+        root.file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| DeriveError::Invalid {
+                path: config_path.clone(),
+                message: "project_id is empty and the repository directory has no UTF-8 name"
+                    .into(),
+            })?
+            .to_owned()
+    } else {
+        config.project_id.clone()
+    };
+    let schema = native_schema(&name, &config_path)?;
     if !config.db.migrations.enabled {
         return invalid(
             config_path,
@@ -159,23 +148,24 @@ pub fn derive_component(repository: impl AsRef<Path>) -> Result<DerivedComponent
         );
     }
 
-    let api_expose = config.api.enabled && config.api.schemas.iter().any(|v| v == &marker.schema);
+    let api_expose = config.api.enabled && config.api.schemas.iter().any(|value| value == &schema);
     let migrations = derive_migrations(&root.join("supabase/migrations"))?;
-    let anon_access = derive_anon_access(&migrations, &marker.schema, &marker_path)?;
-    let depends_on = marker
-        .depends_on
+    let anon_access = derive_anon_access(&migrations, &schema, &config_path)?;
+    let depends_on = migrations
         .iter()
-        .enumerate()
-        .map(|(index, value)| parse_dependency(value, index, &marker_path))
-        .collect::<Result<Vec<_>, _>>()?;
+        .flat_map(|migration| migration.inputs.iter())
+        .map(|input| input.producer_component_spec_hash.to_vec())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
     let context = ComponentContext {
         api_version: CONTEXT_API_VERSION.into(),
-        resource_id: marker.schema.clone(),
+        resource_id: schema.clone(),
         target: TargetContext {
             stack: "local".into(),
             project: "henosis-local".into(),
             database: "postgres".into(),
-            schema: marker.schema,
+            schema,
         },
         migrations,
         api: ApiContext {
@@ -189,12 +179,12 @@ pub fn derive_component(repository: impl AsRef<Path>) -> Result<DerivedComponent
         &serde_json::to_vec(&context).map_err(|source| DeriveError::Serialize { source })?,
     )
     .map_err(|source| DeriveError::Invalid {
-        path: marker_path,
+        path: config_path,
         message: source.to_string(),
     })?;
 
     Ok(DerivedComponent {
-        name: config.project_id,
+        name,
         connector: CONNECTOR_NAME.into(),
         outputs_schema: output_schema(),
         depends_on,
@@ -245,36 +235,113 @@ fn derive_migrations(directory: &Path) -> Result<Vec<Migration>, DeriveError> {
                 path: path.clone(),
                 message: format!("migration must be UTF-8: {source}"),
             })?;
+            let inputs = derive_inputs(&sql, &path)?;
             Ok(Migration {
                 id,
                 checksum: format!("sha256:{}", hex::encode(Sha256::digest(sql.as_bytes()))),
                 sql,
+                inputs,
             })
         })
         .collect()
 }
 
-fn parse_dependency(value: &str, index: usize, path: &Path) -> Result<Vec<u8>, DeriveError> {
-    let bytes = hex::decode(value).map_err(|source| DeriveError::Invalid {
-        path: path.into(),
-        message: format!(
-            "depends_on[{index}] must be a 64-character lowercase hex spec hash: {source}"
-        ),
-    })?;
-    if value.len() != 64 || value.bytes().any(|byte| byte.is_ascii_uppercase()) || bytes.len() != 32
+// === Native identity and input derivation ===
+
+fn native_schema(name: &str, path: &Path) -> Result<String, DeriveError> {
+    let schema = name.replace('-', "_");
+    if schema.is_empty()
+        || schema.len() > 63
+        || !schema.as_bytes()[0].is_ascii_lowercase()
+        || !schema
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
     {
         return invalid(
             path.into(),
-            format!("depends_on[{index}] must be a 64-character lowercase hex spec hash"),
+            format!(
+                "project_id {name:?} cannot derive a PostgreSQL schema; use lowercase letters, \
+                 digits, hyphens, or underscores"
+            ),
         );
     }
-    Ok(bytes)
+    Ok(schema)
+}
+
+fn derive_inputs(sql: &str, path: &Path) -> Result<Vec<InputSlot>, DeriveError> {
+    sql.lines()
+        .enumerate()
+        .filter_map(|(index, line)| {
+            line.trim()
+                .strip_prefix("-- henosis:input ")
+                .map(|declaration| (index + 1, declaration))
+        })
+        .map(|(line, declaration)| parse_input(declaration, line, path))
+        .collect()
+}
+
+fn parse_input(declaration: &str, line: usize, path: &Path) -> Result<InputSlot, DeriveError> {
+    let (name, placeholder) = declaration
+        .split_once('=')
+        .ok_or_else(|| DeriveError::Invalid {
+            path: path.into(),
+            message: format!(
+                "line {line}: input declaration must be NAME=${{henosis:HASH.output}}"
+            ),
+        })?;
+    let body = placeholder
+        .strip_prefix("${henosis:")
+        .and_then(|value| value.strip_suffix('}'))
+        .ok_or_else(|| DeriveError::Invalid {
+            path: path.into(),
+            message: format!("line {line}: input value must use ${{henosis:HASH.output}}"),
+        })?;
+    let (reference, default) = body
+        .split_once(":-")
+        .map(|(reference, default)| (reference, Some(default)))
+        .unwrap_or((body, None));
+    let (producer, output) = reference
+        .rsplit_once('.')
+        .ok_or_else(|| DeriveError::Invalid {
+            path: path.into(),
+            message: format!("line {line}: input reference must contain HASH.output"),
+        })?;
+    let bytes = hex::decode(producer).map_err(|source| DeriveError::Invalid {
+        path: path.into(),
+        message: format!("line {line}: producer hash is invalid: {source}"),
+    })?;
+    let producer_component_spec_hash = bytes.try_into().map_err(|_| DeriveError::Invalid {
+        path: path.into(),
+        message: format!(
+            "line {line}: producer hash must contain 64 lowercase hexadecimal characters"
+        ),
+    })?;
+    if producer.len() != 64 || producer.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        return invalid(
+            path.into(),
+            format!("line {line}: producer hash must contain 64 lowercase hexadecimal characters"),
+        );
+    }
+    let default = default
+        .map(|value| {
+            serde_json::from_str(value).map_err(|source| DeriveError::Invalid {
+                path: path.into(),
+                message: format!("line {line}: input default must be JSON: {source}"),
+            })
+        })
+        .transpose()?;
+    Ok(InputSlot {
+        name: name.trim().into(),
+        producer_component_spec_hash,
+        output: output.into(),
+        default,
+    })
 }
 
 fn derive_anon_access(
     migrations: &[Migration],
     schema: &str,
-    marker_path: &Path,
+    config_path: &Path,
 ) -> Result<AnonAccess, DeriveError> {
     let sql = migrations
         .iter()
@@ -306,7 +373,7 @@ fn derive_anon_access(
         (true, true) => Ok(AnonAccess::Read),
         (false, false) => Ok(AnonAccess::None),
         _ => invalid(
-            marker_path.into(),
+            config_path.into(),
             format!(
                 "native anon-read policy for schema {schema:?} is incomplete: migrations must \
                  contain both `grant usage on schema {schema} to anon` and `grant select on all \
@@ -360,19 +427,11 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         fs::create_dir_all(root.path().join("supabase/migrations")).unwrap();
         fs::write(
-            root.path().join("henosis.toml"),
-            r#"api_version = "henosis.dev/supabase-component/v1"
-schema = "catalog"
-depends_on = []
-"#,
-        )
-        .unwrap();
-        fs::write(
             root.path().join("supabase/config.toml"),
             r#"project_id = "service-d"
 [api]
 enabled = true
-schemas = ["public", "graphql_public", "catalog"]
+schemas = ["public", "graphql_public", "service_d"]
 [db.migrations]
 enabled = true
 "#,
@@ -381,8 +440,8 @@ enabled = true
         fs::write(
             root.path()
                 .join("supabase/migrations/202607130001_create_items.sql"),
-            "create table items (id bigint primary key);\ngrant usage on schema catalog to \
-             anon;\ngrant select on all tables in schema catalog to anon;\n",
+            "create table items (id bigint primary key);\ngrant usage on schema service_d to \
+             anon;\ngrant select on all tables in schema service_d to anon;\n",
         )
         .unwrap();
         root
@@ -393,13 +452,13 @@ enabled = true
         let root = native_project();
         let derived = derive_component(root.path()).unwrap();
         assert_eq!(derived.name, "service-d");
-        assert_eq!(derived.connector_context.resource_id, "catalog");
+        assert_eq!(derived.connector_context.resource_id, "service_d");
         assert!(derived.connector_context.api.expose);
         assert_eq!(derived.connector_context.migrations.len(), 1);
         assert_eq!(
             derived.connector_context.migrations[0].sql,
-            "create table items (id bigint primary key);\ngrant usage on schema catalog to \
-             anon;\ngrant select on all tables in schema catalog to anon;\n"
+            "create table items (id bigint primary key);\ngrant usage on schema service_d to \
+             anon;\ngrant select on all tables in schema service_d to anon;\n"
         );
         assert_eq!(derived.connector_context.api.anon_access, AnonAccess::Read);
     }
@@ -439,13 +498,38 @@ enabled = true
     }
 
     #[test]
+    fn derives_dependencies_and_slots_from_native_migration_comments() {
+        let root = native_project();
+        let producer = "09".repeat(32);
+        fs::write(
+            root.path()
+                .join("supabase/migrations/202607130001_create_items.sql"),
+            format!(
+                "-- henosis:input upstream_url=${{henosis:{producer}.apiUrl}}\ncreate table items \
+                 (url text default current_setting('henosis.input.upstream_url'));\n"
+            ),
+        )
+        .unwrap();
+        let derived = derive_component(root.path()).unwrap();
+        assert_eq!(derived.depends_on, vec![vec![9; 32]]);
+        assert_eq!(
+            derived.connector_context.migrations[0].inputs[0].name,
+            "upstream_url"
+        );
+        assert_eq!(
+            derived.connector_context.migrations[0].inputs[0].output,
+            "apiUrl"
+        );
+    }
+
+    #[test]
     fn partial_or_commented_grants_cannot_claim_read_policy() {
         let root = native_project();
         fs::write(
             root.path()
                 .join("supabase/migrations/202607130001_create_items.sql"),
-            "-- grant select on all tables in schema catalog to anon;\ngrant usage on schema \
-             catalog to anon;\n",
+            "-- grant select on all tables in schema service_d to anon;\ngrant usage on schema \
+             service_d to anon;\n",
         )
         .unwrap();
         let error = derive_component(root.path()).unwrap_err().to_string();

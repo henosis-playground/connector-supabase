@@ -396,6 +396,7 @@ where
             resource_id,
             schema,
             migration,
+            inputs,
         } => {
             transaction
                 .batch_execute(&format!(
@@ -404,6 +405,15 @@ where
                 ))
                 .await
                 .map_err(provider_or_unavailable)?;
+            for (name, value) in inputs {
+                transaction
+                    .query_one(
+                        "select set_config($1, $2, true)",
+                        &[&format!("henosis.input.{name}"), value],
+                    )
+                    .await
+                    .map_err(provider_or_unavailable)?;
+            }
             transaction
                 .batch_execute(&migration.sql)
                 .await

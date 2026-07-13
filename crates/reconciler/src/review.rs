@@ -190,7 +190,14 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), ReviewError> {
     temporary.write_all(bytes).map_err(io)?;
     temporary.as_file_mut().sync_all().map_err(io)?;
     temporary.persist(path).map_err(|error| io(error.error))?;
+    sync_directory(parent)?;
     Ok(())
+}
+
+fn sync_directory(directory: &Path) -> Result<(), ReviewError> {
+    fs::File::open(directory)
+        .and_then(|file| file.sync_all())
+        .map_err(io)
 }
 
 fn io(error: impl std::fmt::Display) -> ReviewError {
@@ -239,10 +246,13 @@ mod tests {
                         id: "one".into(),
                         checksum: "sha256:checksum".into(),
                         sql: "create table secret_shape (id bigint);".into(),
+                        inputs: Vec::new(),
                     },
+                    inputs: std::collections::BTreeMap::new(),
                 },
             }],
             planned_outputs: Vec::new(),
+            notices: Vec::new(),
         };
         plan.refresh_id();
         let root = tempfile::tempdir().unwrap();

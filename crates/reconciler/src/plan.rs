@@ -53,6 +53,9 @@ pub struct ExecutablePlan {
     pub operations: Vec<PlannedOperation>,
     /// Fully known outputs, with secrets represented only by references.
     pub planned_outputs: Vec<PlannedOutput>,
+    /// Non-blocking materialization notices reported with the resulting level.
+    #[serde(default)]
+    pub notices: Vec<PlanDiagnostic>,
 }
 
 #[derive(Serialize)]
@@ -71,6 +74,7 @@ struct PlanPayload<'a> {
     journal_tail: &'a str,
     operations: &'a [PlannedOperation],
     planned_outputs: &'a [PlannedOutput],
+    notices: &'a [PlanDiagnostic],
 }
 
 /// One operation in the complete proposal.
@@ -159,6 +163,8 @@ pub enum Operation {
         schema: String,
         /// Exact migration payload.
         migration: Migration,
+        /// Materialized transaction-local `PostgreSQL` settings.
+        inputs: BTreeMap<String, String>,
     },
     /// Converge `PostgREST` exposed schemas and anonymous grants.
     ConfigureApi {
@@ -192,7 +198,8 @@ pub struct PlannedOutput {
 }
 
 /// One plan-phase failure attached to its component.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct PlanDiagnostic {
     /// Producer spec hash.
     pub component_spec_hash: [u8; 32],
@@ -204,6 +211,8 @@ pub struct PlanDiagnostic {
     pub pointer: String,
     /// Actionable guidance.
     pub help: String,
+    /// Whether the diagnostic is a non-blocking informational notice.
+    pub informational: bool,
 }
 
 /// Connector/runtime facts bound into a plan but not desired by authoring.
@@ -246,6 +255,7 @@ pub fn validate_desired(desired: &DesiredSlice, journal: &JournalSnapshot) -> Ve
             help: "Retire/release the owning graph before assigning the exclusive v1 local target \
                    to another graph."
                 .into(),
+            informational: false,
         });
     }
     for component in desired.components.iter() {
@@ -256,6 +266,7 @@ pub fn validate_desired(desired: &DesiredSlice, journal: &JournalSnapshot) -> Ve
                 message: issue.message,
                 pointer: issue.pointer,
                 help: issue.help,
+                informational: false,
             }
         }));
         if let Some(binding) = journal.bindings.get(&component.context.resource_id)
@@ -279,6 +290,7 @@ pub fn validate_desired(desired: &DesiredSlice, journal: &JournalSnapshot) -> Ve
                 help: "Keep resourceId and target schema stable across revisions; ownership moves \
                        require an explicit future handover operation."
                     .into(),
+                informational: false,
             });
         }
     }
@@ -297,6 +309,7 @@ pub fn build_plan(
     let desired_digest = format!("blake3:{}", hex::encode(desired.desired_digest()));
     let observed_digest = format!("blake3:{}", hex::encode(observed.digest()));
     let mut operations = Vec::new();
+    let mut notices = Vec::new();
     let mut last_by_resource = BTreeMap::<String, String>::new();
 
     for component in desired.components.iter() {
@@ -392,6 +405,13 @@ pub fn build_plan(
         }
 
         for migration in &context.migrations {
+            let inputs = materialize_inputs(
+                desired,
+                component.spec_hash,
+                migration,
+                &mut diagnostics,
+                &mut notices,
+            );
             match observed.migration_checksum(&context.resource_id, &migration.id) {
                 Some(checksum) if checksum == migration.checksum => continue,
                 Some(checksum) => {
@@ -414,6 +434,7 @@ pub fn build_plan(
                         help: "Never edit an applied migration ID; append a new corrective \
                                migration."
                             .into(),
+                        informational: false,
                     });
                     continue;
                 }
@@ -423,6 +444,7 @@ pub fn build_plan(
                 resource_id: context.resource_id.clone(),
                 schema: context.target.schema.clone(),
                 migration: migration.clone(),
+                inputs,
             };
             let id = operation_id(&desired_digest, &operation);
             operations.push(PlannedOperation {
@@ -559,9 +581,79 @@ pub fn build_plan(
         journal_tail: context.journal_tail_after_plan.to_string(),
         operations,
         planned_outputs,
+        notices,
     };
     plan.refresh_id();
     Ok(plan)
+}
+
+// === Upstream input materialization ===
+
+fn materialize_inputs(
+    desired: &DesiredSlice,
+    component_spec_hash: [u8; 32],
+    migration: &Migration,
+    diagnostics: &mut Vec<PlanDiagnostic>,
+    notices: &mut Vec<PlanDiagnostic>,
+) -> BTreeMap<String, String> {
+    let mut materialized = BTreeMap::new();
+    for (index, input) in migration.inputs.iter().enumerate() {
+        let value = desired
+            .upstream_outputs
+            .get(&input.producer_component_spec_hash)
+            .and_then(|output| {
+                serde_json::from_slice::<serde_json::Value>(&output.values_json).ok()
+            })
+            .and_then(|values| values.get(&input.output).cloned());
+        let (value, used_default) = match (value, &input.default) {
+            (Some(value), _) => (value, false),
+            (None, Some(default)) => (default.clone(), true),
+            (None, None) => {
+                diagnostics.push(PlanDiagnostic {
+                    component_spec_hash,
+                    code: "supabase.input.unbound".into(),
+                    message: format!(
+                        "required input {:?} for migration {:?} is missing producer {} output {:?}",
+                        input.name,
+                        migration.id,
+                        hex::encode(input.producer_component_spec_hash),
+                        input.output
+                    ),
+                    pointer: format!("/migrations/{}/inputs/{index}", migration.id),
+                    help: "Publish the named output for the current graph generation before \
+                           retrying."
+                        .into(),
+                    informational: false,
+                });
+                continue;
+            }
+        };
+        if used_default {
+            notices.push(PlanDiagnostic {
+                component_spec_hash,
+                code: "supabase.input.defaulted".into(),
+                message: format!(
+                    "input {:?} for migration {:?} used its declared default because producer {} \
+                     output {:?} was absent",
+                    input.name,
+                    migration.id,
+                    hex::encode(input.producer_component_spec_hash),
+                    input.output
+                ),
+                pointer: format!("/migrations/{}/inputs/{index}/default", migration.id),
+                help: "Publish the upstream value to replace the default in a future unapplied \
+                       migration."
+                    .into(),
+                informational: true,
+            });
+        }
+        let setting = match value {
+            serde_json::Value::String(value) => value,
+            value => serde_json::to_string(&value).expect("input value is JSON"),
+        };
+        materialized.insert(input.name.clone(), setting);
+    }
+    materialized
 }
 
 impl ExecutablePlan {
@@ -580,6 +672,7 @@ impl ExecutablePlan {
             journal_tail: &self.journal_tail,
             operations: &self.operations,
             planned_outputs: &self.planned_outputs,
+            notices: &self.notices,
         }
     }
 
@@ -629,8 +722,10 @@ mod tests {
     use super::*;
     use crate::context::ApiContext;
     use crate::context::ComponentContext;
+    use crate::context::InputSlot;
     use crate::context::TargetContext;
     use crate::slice::ComponentPin;
+    use crate::slice::UpstreamOutput;
     use crate::target::DatabaseIdentity;
 
     fn desired() -> DesiredSlice {
@@ -639,6 +734,7 @@ mod tests {
             id: "202607130001_create_items".into(),
             checksum: format!("sha256:{}", hex::encode(Sha256::digest(sql.as_bytes()))),
             sql,
+            inputs: Vec::new(),
         };
         let mut components = IdOrdMap::new();
         components
@@ -715,6 +811,108 @@ mod tests {
         assert_eq!(
             plan.planned_outputs[0].values["anonKeyRef"],
             "docker-secret://anon"
+        );
+    }
+
+    #[test]
+    fn materializes_upstream_values_into_transaction_local_inputs() {
+        let mut desired = desired();
+        let component = desired.components.iter().next().unwrap().clone();
+        let mut updated = component.clone();
+        updated.context.migrations[0].inputs.push(InputSlot {
+            name: "upstream_url".into(),
+            producer_component_spec_hash: [9; 32],
+            output: "apiUrl".into(),
+            default: None,
+        });
+        desired.components.remove(&component.spec_hash);
+        desired.components.insert_unique(updated).unwrap();
+        desired
+            .upstream_outputs
+            .insert_unique(UpstreamOutput {
+                component_spec_hash: [9; 32],
+                values_json: serde_json::to_vec(&serde_json::json!({
+                    "apiUrl": "https://upstream.example"
+                }))
+                .unwrap(),
+            })
+            .unwrap();
+        let plan = build_plan(
+            &desired,
+            &JournalSnapshot::default(),
+            &observed(),
+            PlanContext {
+                journal_tail_after_plan: 1,
+                connector_build: "test-build",
+                api_url: "http://localhost:4484",
+                database_url_ref: "docker-secret://db",
+                anon_key_ref: "docker-secret://anon",
+            },
+        )
+        .unwrap();
+        let inputs = plan
+            .operations
+            .iter()
+            .find_map(|operation| match &operation.operation {
+                Operation::ApplyMigration { inputs, .. } => Some(inputs),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(inputs["upstream_url"], "https://upstream.example");
+    }
+
+    #[test]
+    fn unbound_required_input_blocks_plan_and_defaulted_input_is_noted() {
+        let mut desired = desired();
+        let component = desired.components.iter().next().unwrap().clone();
+        let mut updated = component.clone();
+        updated.context.migrations[0].inputs = vec![InputSlot {
+            name: "required_value".into(),
+            producer_component_spec_hash: [9; 32],
+            output: "missing".into(),
+            default: None,
+        }];
+        desired.components.remove(&component.spec_hash);
+        desired.components.insert_unique(updated.clone()).unwrap();
+        let error = build_plan(
+            &desired,
+            &JournalSnapshot::default(),
+            &observed(),
+            PlanContext {
+                journal_tail_after_plan: 1,
+                connector_build: "test-build",
+                api_url: "http://localhost:4484",
+                database_url_ref: "docker-secret://db",
+                anon_key_ref: "docker-secret://anon",
+            },
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .iter()
+                .any(|item| item.code == "supabase.input.unbound")
+        );
+
+        updated.context.migrations[0].inputs[0].default = Some(serde_json::json!("fallback"));
+        desired.components.remove(&component.spec_hash);
+        desired.components.insert_unique(updated).unwrap();
+        let plan = build_plan(
+            &desired,
+            &JournalSnapshot::default(),
+            &observed(),
+            PlanContext {
+                journal_tail_after_plan: 1,
+                connector_build: "test-build",
+                api_url: "http://localhost:4484",
+                database_url_ref: "docker-secret://db",
+                anon_key_ref: "docker-secret://anon",
+            },
+        )
+        .unwrap();
+        assert!(
+            plan.notices
+                .iter()
+                .any(|item| item.code == "supabase.input.defaulted")
         );
     }
 

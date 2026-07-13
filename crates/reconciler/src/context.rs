@@ -49,6 +49,24 @@ pub struct Migration {
     pub checksum: String,
     /// Non-secret additive SQL.
     pub sql: String,
+    /// Typed upstream values exposed to this migration through
+    /// transaction-local settings.
+    #[serde(default)]
+    pub inputs: Vec<InputSlot>,
+}
+
+/// One native migration input declaration.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct InputSlot {
+    /// `PostgreSQL` setting suffix available as `henosis.input.<name>`.
+    pub name: String,
+    /// Immutable producer component-spec hash.
+    pub producer_component_spec_hash: [u8; 32],
+    /// Top-level producer output property.
+    pub output: String,
+    /// Optional value used when the producer output is absent.
+    pub default: Option<serde_json::Value>,
 }
 
 /// Reconciled `PostgREST` configuration.
@@ -179,6 +197,33 @@ impl ComponentContext {
                         .into(),
                 });
             }
+            let mut input_names = std::collections::BTreeSet::new();
+            for (input_index, input) in migration.inputs.iter().enumerate() {
+                if !is_input_name(&input.name) || !is_input_name(&input.output) {
+                    issues.push(PlanIssue {
+                        code: "supabase.input.invalid",
+                        message: format!(
+                            "migration {:?} input {:?} has an invalid name or output property",
+                            migration.id, input.name
+                        ),
+                        pointer: format!("/migrations/{index}/inputs/{input_index}"),
+                        help: "Use lowercase letters, digits, and underscores, beginning with a \
+                               letter."
+                            .into(),
+                    });
+                }
+                if !input_names.insert(&input.name) {
+                    issues.push(PlanIssue {
+                        code: "supabase.input.duplicate",
+                        message: format!(
+                            "migration {:?} declares input {:?} more than once",
+                            migration.id, input.name
+                        ),
+                        pointer: format!("/migrations/{index}/inputs/{input_index}/name"),
+                        help: "Give each migration input a unique setting name.".into(),
+                    });
+                }
+            }
             if migration.sql.trim().is_empty() {
                 issues.push(PlanIssue {
                     code: "supabase.plan.migration-empty",
@@ -245,6 +290,15 @@ fn validate_schema(value: &str) -> Result<(), ContextError> {
     }
 }
 
+fn is_input_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 63
+        && value.as_bytes()[0].is_ascii_lowercase()
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
 fn is_migration_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 96
@@ -294,6 +348,7 @@ mod tests {
                 id: "202607130001_create_items".into(),
                 checksum: format!("sha256:{}", hex::encode(Sha256::digest(sql.as_bytes()))),
                 sql,
+                inputs: Vec::new(),
             }],
             api: ApiContext {
                 expose: true,

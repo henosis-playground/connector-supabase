@@ -281,7 +281,7 @@ impl Reconciler {
             }
             let bytes =
                 fs::read(&path).map_err(|error| ReconcileError::State(error.to_string()))?;
-            let checkpoint = serde_json::from_slice::<Checkpoint>(&bytes)
+            let mut checkpoint = serde_json::from_slice::<Checkpoint>(&bytes)
                 .map_err(|error| ReconcileError::State(error.to_string()))?;
             if checkpoint.retired {
                 continue;
@@ -298,7 +298,14 @@ impl Reconciler {
                 .write()
                 .await
                 .insert(checkpoint.graph_id, desired);
-            self.schedule(checkpoint.graph_id, checkpoint.sequence, Duration::ZERO);
+            let delay = if checkpoint.last_report.is_some()
+                && !self.deliver_pending_report(&mut checkpoint).await?
+            {
+                report_retry_delay()
+            } else {
+                Duration::ZERO
+            };
+            self.schedule(checkpoint.graph_id, checkpoint.sequence, delay);
             count += 1;
         }
         Ok(count)
@@ -364,6 +371,14 @@ impl Reconciler {
             .get(&graph_id)
             .cloned()
             .ok_or_else(|| ReconcileError::State("accepted desired slice is not loaded".into()))?;
+        if checkpoint.last_report.is_some() {
+            if self.deliver_pending_report(&mut checkpoint).await? {
+                self.schedule(graph_id, expected_sequence, Duration::ZERO);
+            } else {
+                self.schedule(graph_id, expected_sequence, report_retry_delay());
+            }
+            return Ok(());
+        }
         let span = tracing::span!(
             Level::INFO,
             "supabase.reconcile_slice",
@@ -637,7 +652,12 @@ impl Reconciler {
                 let evidence = PublicationEvidence::default()
                     .with_revision(plan.observed_digest.clone())
                     .with_uri(self.journal.evidence_uri(journal.tail));
-                let report = ready_report(&desired, outputs, evidence);
+                let report = ready_report(
+                    &desired,
+                    outputs,
+                    evidence,
+                    plan_diagnostics(plan.notices.clone()),
+                );
                 let publication_id = stable_publication_id(&report);
                 self.publish(&mut checkpoint, report, publication_id)
                     .await?;
@@ -693,8 +713,10 @@ impl Reconciler {
         .await
     }
 
+    // === Durable report delivery ===
+
     async fn publish(
-        &self,
+        self: &Arc<Self>,
         checkpoint: &mut Checkpoint,
         report: SliceReport,
         publication_id: Option<Vec<u8>>,
@@ -704,17 +726,37 @@ impl Reconciler {
             publication_id,
             report,
         };
-        checkpoint.last_report = Some(snapshot.clone());
+        checkpoint.last_report = Some(snapshot);
         self.save(checkpoint)?;
-        self.reporter
-            .report(ReportSliceRequest {
-                request_id: Some(snapshot.request_id),
-                report: buffa::MessageField::some(snapshot.report),
-                publication_id: snapshot.publication_id,
-                ..Default::default()
-            })
-            .await?;
+        if !self.deliver_pending_report(checkpoint).await? {
+            self.schedule(
+                checkpoint.graph_id,
+                checkpoint.sequence,
+                report_retry_delay(),
+            );
+        }
         Ok(())
+    }
+
+    async fn deliver_pending_report(
+        &self,
+        checkpoint: &mut Checkpoint,
+    ) -> Result<bool, ReconcileError> {
+        let Some(snapshot) = checkpoint.last_report.clone() else {
+            return Ok(true);
+        };
+        let request = ReportSliceRequest {
+            request_id: Some(snapshot.request_id),
+            report: buffa::MessageField::some(snapshot.report),
+            publication_id: snapshot.publication_id,
+            ..Default::default()
+        };
+        if self.reporter.report(request).await.is_err() {
+            return Ok(false);
+        }
+        checkpoint.last_report = None;
+        self.save(checkpoint)?;
+        Ok(true)
     }
 
     fn schedule(self: &Arc<Self>, graph_id: [u8; 16], sequence: u64, delay: Duration) {
@@ -775,10 +817,28 @@ impl Reconciler {
             .sync_all()
             .map_err(|error| ReconcileError::State(error.to_string()))?;
         temporary
-            .persist(path)
+            .persist(&path)
             .map_err(|error| ReconcileError::State(error.error.to_string()))?;
+        sync_directory(parent)?;
         Ok(())
     }
+}
+
+fn report_retry_delay() -> Duration {
+    #[cfg(test)]
+    {
+        Duration::from_millis(25)
+    }
+    #[cfg(not(test))]
+    {
+        Duration::from_secs(2)
+    }
+}
+
+fn sync_directory(directory: &Path) -> Result<(), ReconcileError> {
+    fs::File::open(directory)
+        .and_then(|file| file.sync_all())
+        .map_err(|error| ReconcileError::State(error.to_string()))
 }
 
 fn validate_plan_identity(
@@ -881,13 +941,17 @@ fn plan_diagnostics(diagnostics: Vec<PlanDiagnostic>) -> Vec<Diagnostic> {
     diagnostics
         .into_iter()
         .map(|item| {
-            diagnostic(
+            let mut value = diagnostic(
                 &item.code,
                 &item.message,
                 Some(item.component_spec_hash.to_vec()),
                 Some(&item.help),
                 Some(&item.pointer),
-            )
+            );
+            if item.informational {
+                value.severity = Some(DiagnosticSeverity::Info.into());
+            }
+            value
         })
         .collect()
 }
@@ -991,12 +1055,13 @@ fn ready_report(
     desired: &DesiredSlice,
     outputs: Vec<henosis_proto::proto::henosis::v1::ComponentOutputs>,
     publication: PublicationEvidence,
+    diagnostics: Vec<Diagnostic>,
 ) -> SliceReport {
     let mut report = report_for(
         desired,
         ComponentDispositionKind::Ready,
         outputs,
-        Vec::new(),
+        diagnostics,
     );
     report.publication = buffa::MessageField::some(publication);
     report
@@ -1025,4 +1090,179 @@ fn stable_publication_id(report: &SliceReport) -> Option<Vec<u8>> {
 fn _path_is_private_plan(path: &Path) -> bool {
     path.components()
         .any(|component| component.as_os_str() == "plans")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
+
+    use crate::journal::JournalConfig;
+    use crate::target::TargetConfig;
+
+    use super::*;
+
+    #[derive(Default)]
+    struct RecordingReporter {
+        failures_remaining: AtomicUsize,
+        requests: std::sync::Mutex<Vec<ReportSliceRequest>>,
+    }
+
+    impl Reporter for RecordingReporter {
+        fn report(
+            &self,
+            request: ReportSliceRequest,
+        ) -> Pin<Box<dyn Future<Output = Result<(), ReportError>> + Send + '_>> {
+            Box::pin(async move {
+                self.requests.lock().unwrap().push(request);
+                if self
+                    .failures_remaining
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
+                        value.checked_sub(1)
+                    })
+                    .is_ok()
+                {
+                    Err(ReportError("injected callback failure".into()))
+                } else {
+                    Ok(())
+                }
+            })
+        }
+
+        fn fetch_slice(
+            &self,
+            _graph_id: [u8; 16],
+            _sequence: u64,
+        ) -> Pin<Box<dyn Future<Output = Result<GraphSlice, ReportError>> + Send + '_>> {
+            Box::pin(async { Err(ReportError("not used".into())) })
+        }
+    }
+
+    fn reconciler(reporter: Arc<RecordingReporter>) -> (tempfile::TempDir, Arc<Reconciler>) {
+        let state = tempfile::tempdir().unwrap();
+        let target = Target::new(TargetConfig {
+            host: "invalid".into(),
+            port: 5432,
+            user: "postgres".into(),
+            database: "postgres".into(),
+            password_file: state.path().join("missing-password"),
+            api_url: "http://localhost".into(),
+            database_url_ref: "secret://db".into(),
+            anon_key_ref: "secret://anon".into(),
+        });
+        let journal = OperationJournal::connect(&JournalConfig {
+            access_token: "test".into(),
+            account_endpoint: "http://localhost:1".into(),
+            basin_endpoint: "http://localhost:1".into(),
+            basin: "test-basin".into(),
+            stream: "test-stream".into(),
+        })
+        .unwrap();
+        let reconciler = Arc::new(
+            Reconciler::new(
+                ReconcilerConfig {
+                    state_dir: state.path().into(),
+                    connector_build: "test".into(),
+                },
+                target,
+                journal,
+                reporter,
+            )
+            .unwrap(),
+        );
+        (state, reconciler)
+    }
+
+    fn checkpoint(sequence: u64, request_id: Vec<u8>) -> Checkpoint {
+        Checkpoint {
+            graph_id: [3; 16],
+            generation: 1,
+            sequence,
+            desired_digest: [4; 32],
+            current_plan: None,
+            last_report: Some(ReportSnapshot {
+                request_id,
+                publication_id: Some(vec![8; 16]),
+                report: SliceReport::default().with_sequence(sequence),
+            }),
+            retired: false,
+        }
+    }
+
+    #[tokio::test]
+    async fn pending_report_retries_until_acked_with_same_request_id() {
+        let reporter = Arc::new(RecordingReporter {
+            failures_remaining: AtomicUsize::new(2),
+            ..Default::default()
+        });
+        let (_state, reconciler) = reconciler(Arc::clone(&reporter));
+        let request_id = vec![7; 16];
+        let mut checkpoint = checkpoint(9, request_id.clone());
+        reconciler.save(&checkpoint).unwrap();
+        assert!(
+            !reconciler
+                .deliver_pending_report(&mut checkpoint)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !reconciler
+                .deliver_pending_report(&mut checkpoint)
+                .await
+                .unwrap()
+        );
+        assert!(
+            reconciler
+                .deliver_pending_report(&mut checkpoint)
+                .await
+                .unwrap()
+        );
+        assert!(checkpoint.last_report.is_none());
+        let requests = reporter.requests.lock().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.request_id.as_deref() == Some(request_id.as_slice()))
+        );
+    }
+
+    #[tokio::test]
+    async fn persisted_report_replays_original_request_id_after_reload() {
+        let reporter = Arc::new(RecordingReporter::default());
+        let (_state, reconciler) = reconciler(Arc::clone(&reporter));
+        let request_id = vec![5; 16];
+        reconciler.save(&checkpoint(4, request_id.clone())).unwrap();
+        let mut recovered = reconciler.load([3; 16]).unwrap().unwrap();
+        assert!(
+            reconciler
+                .deliver_pending_report(&mut recovered)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            reporter.requests.lock().unwrap()[0].request_id.as_deref(),
+            Some(request_id.as_slice())
+        );
+    }
+
+    #[tokio::test]
+    async fn newer_sequence_supersedes_pending_report() {
+        let reporter = Arc::new(RecordingReporter::default());
+        let (_state, reconciler) = reconciler(reporter);
+        reconciler.save(&checkpoint(4, vec![5; 16])).unwrap();
+        let replacement = Checkpoint {
+            graph_id: [3; 16],
+            generation: 2,
+            sequence: 5,
+            desired_digest: [6; 32],
+            current_plan: None,
+            last_report: None,
+            retired: false,
+        };
+        reconciler.save(&replacement).unwrap();
+        let recovered = reconciler.load([3; 16]).unwrap().unwrap();
+        assert_eq!(recovered.sequence, 5);
+        assert!(recovered.last_report.is_none());
+    }
 }
