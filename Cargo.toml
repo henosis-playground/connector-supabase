@@ -51,7 +51,7 @@ tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"] }
 uuid = { version = "1.17.0", features = ["v5", "v7"] }
 
-connector-sdk = { git = "https://github.com/henosis-playground/connector-sdk.git", branch = "main" }
+connector-sdk = { git = "https://github.com/henosis-playground/connector-sdk.git", branch = "feat/audit-consumption" }
 
 henosis-supabase-reconciler = { path = "crates/reconciler" }
 

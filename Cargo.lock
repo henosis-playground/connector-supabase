@@ -365,7 +365,7 @@ checksum = "cc14f565cf027a105f7a44ccf9e5b424348421a1d8952a8fc9d499d313107789"
 [[package]]
 name = "connector-sdk"
 version = "0.1.0"
-source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=main#43a03a86231ba6c4920e110d67aea3005052e418"
+source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=feat%2Faudit-consumption#44592c3c287367623e35f1d28803a5c6201d7637"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -385,7 +385,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "workspace-hack 0.0.0 (git+https://github.com/henosis-playground/connector-sdk.git?branch=main)",
+ "workspace-hack 0.0.0 (git+https://github.com/henosis-playground/connector-sdk.git?branch=feat%2Faudit-consumption)",
 ]
 
 [[package]]
@@ -694,7 +694,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1734,7 +1734,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1892,7 +1892,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2389,7 +2389,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3053,6 +3053,14 @@ dependencies = [
 [[package]]
 name = "workspace-hack"
 version = "0.0.0"
+source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=feat%2Faudit-consumption#44592c3c287367623e35f1d28803a5c6201d7637"
+dependencies = [
+ "serde_core",
+]
+
+[[package]]
+name = "workspace-hack"
+version = "0.0.0"
 source = "git+https://github.com/henosis-playground/core.git?branch=fix%2Fverification-loop-1#d3d9b98cc185fbc2b8e46e2ccdc38306e0665076"
 dependencies = [
  "bitflags",
@@ -3078,14 +3086,6 @@ dependencies = [
  "tracing",
  "tracing-core",
  "uuid",
-]
-
-[[package]]
-name = "workspace-hack"
-version = "0.0.0"
-source = "git+https://github.com/henosis-playground/connector-sdk.git?branch=main#43a03a86231ba6c4920e110d67aea3005052e418"
-dependencies = [
- "serde_core",
 ]
 
 [[package]]

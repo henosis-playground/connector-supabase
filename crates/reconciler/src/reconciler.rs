@@ -135,10 +135,11 @@ impl Connector for SupabaseConnector {
         if plan.operations.is_empty() {
             return PlanOutcome::Ready {
                 outputs: plan.outputs(),
-                publication: Publication {
+                diagnostics: Vec::new(),
+                publication: Some(Publication {
                     revision: plan.observed_digest,
                     uri: self.journal.evidence_uri(observed.journal.tail),
-                },
+                }),
             };
         }
         let event = JournalEvent::PlanCreated {
